@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, Contact
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, Contact, Location
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -10,6 +10,7 @@ from telegram.ext import (
     filters
 )
 from telegram.constants import ParseMode
+from telegram.error import Conflict, TelegramError
 import config
 from database import Database
 
@@ -72,20 +73,13 @@ async def check_subscription(user_id, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def check_all_subscriptions(user_id, context: ContextTypes.DEFAULT_TYPE):
-    """Проверка подписок на все платформы (Telegram, Instagram, YouTube)"""
+    """Проверка подписки на Telegram канал"""
     # Проверяем подписку на Telegram канал
     telegram_subscribed = await check_subscription(user_id, context)
     
-    # Проверяем подписки на социальные сети из базы данных
-    social_subs = db.check_all_subscriptions(user_id)
-    instagram_subscribed = social_subs.get('instagram', False)
-    youtube_subscribed = social_subs.get('youtube', False)
-    
     return {
         'telegram': telegram_subscribed,
-        'instagram': instagram_subscribed,
-        'youtube': youtube_subscribed,
-        'all_subscribed': telegram_subscribed and instagram_subscribed and youtube_subscribed
+        'all_subscribed': telegram_subscribed
     }
 
 
@@ -152,46 +146,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             keyboard.append([InlineKeyboardButton("✅ Telegram каналга обуна бўлганман", callback_data='check_telegram_sub')])
         
-        # Instagram
-        if not subscriptions['instagram']:
-            keyboard.append([InlineKeyboardButton("📷 Instagram", url=config.INSTAGRAM_URL)])
-            keyboard.append([InlineKeyboardButton("✅ Instagramга обуна бўлдим", callback_data='confirm_instagram')])
-        else:
-            keyboard.append([InlineKeyboardButton("✅ Instagramга обуна бўлганман", callback_data='confirm_instagram')])
-        
-        # YouTube
-        if not subscriptions['youtube']:
-            keyboard.append([InlineKeyboardButton("📺 YouTube", url=config.YOUTUBE_URL)])
-            keyboard.append([InlineKeyboardButton("✅ YouTubeга обуна бўлдим", callback_data='confirm_youtube')])
-        else:
-            keyboard.append([InlineKeyboardButton("✅ YouTubeга обуна бўлганман", callback_data='confirm_youtube')])
-        
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         # Формируем список платформ с отметками о подписке
-        platforms_text = []
         if subscriptions['telegram']:
-            platforms_text.append("✅ 📢 Telegram канал")
+            platform_status = "✅ 📢 Telegram канал"
         else:
-            platforms_text.append("❌ 📢 Telegram канал")
-        
-        if subscriptions['instagram']:
-            platforms_text.append("✅ 📷 Instagram")
-        else:
-            platforms_text.append("❌ 📷 Instagram")
-        
-        if subscriptions['youtube']:
-            platforms_text.append("✅ 📺 YouTube")
-        else:
-            platforms_text.append("❌ 📺 YouTube")
-        
-        platforms_list = "\n".join([f"• {platform}" for platform in platforms_text])
+            platform_status = "❌ 📢 Telegram канал"
         
         welcome_text = (
-            "👋🏻 <b>Хуш келибсиз!</b>\n\n"
-            "Мен Шерзод Тойиров, сиз ёзган саволларга шахсан ўзим жавоб бераман.\n\n"
-            "⚠️ <b>Ундан олдин куйидаги платформаларга аъзо бўлишингиз ШАРТ:</b>\n\n"
-            f"{platforms_list}\n\n"
+            "⚠️ <b>Ундан олдин Telegram каналга аъзо бўлишингиз ШАРТ:</b>\n\n"
+            f"• {platform_status}\n\n"
             "Юқоридаги тугмаларни босиб обуна бўлинг ва тасдиқланг!"
         )
         
@@ -217,18 +182,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(doctor_welcome, parse_mode=ParseMode.HTML)
         return
     
-    # Обычный пользователь - показываем приветствие
-    welcome_text = (
-        "👋🏻 <b>Хуш келибсиз!</b>\n\n"
-        "Мен Шерзод Тойиров, сиз ёзган саволларга шахсан ўзим жавоб бераман.\n\n"
-        "📝 <b>Муаммо ва савалларингизни</b> матн, видео, расм, хужжат, МРТ шаклда юбориб батафсил ёзинг 👇🏻\n\n"
-        "⏱️ Жавоб бироз кечикиши мумкин, лекин барча хабарларга албатта жавоб бераман😊\n\n"
-        "📋 <b>Mavjud buyruqlar:</b>\n"
-        "/myquestions - Mening savollarim\n"
-        "/help - Yordam"
-    )
+    # Обычный пользователь - показываем только кнопки
+    keyboard = [
+        [KeyboardButton("📍 Klinika manzili")],
+        [KeyboardButton("Алоқа учун")]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
-    await update.message.reply_text(welcome_text, parse_mode=ParseMode.HTML)
+    welcome_message = (
+        "✅ <b>Энди саволларингизни беришингиз мумкин!</b>\n\n"
+        "📝 Саволларингизни матн, видео, расм, хужжат, МРТ шаклда юборинг.\n\n"
+        "⏱️ Жавоб бироз кечикиши мумкин, лекин барча хабарларга албатта жавоб бераман😊"
+    )
+    await update.message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
 
 async def update_subscription_status(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
@@ -236,26 +202,43 @@ async def update_subscription_status(update: Update, context: ContextTypes.DEFAU
     subscriptions = await check_all_subscriptions(user_id, context)
     
     if subscriptions['all_subscribed']:
-        # Все подписки подтверждены
-        welcome_text = (
-            "✅ <b>Барча платформаларга обуна бўлдингиз!</b>\n\n"
-            "👋🏻 <b>Хуш келибсиз!</b>\n\n"
-            "Мен Шерзод Тойиров, сиз ёзган саволларга шахсан ўзим жавоб бераман.\n\n"
-            "📝 <b>Муаммо ва савалларингизни</b> матн, видео, расм, хужжат, МРТ шаклда юбориб батафсил ёзинг 👇🏻\n\n"
-            "⏱️ Жавоб бироз кечикиши мумкин, лекин барча хабарларга албатта жавоб бераман😊\n\n"
-            "📋 <b>Mavjud buyruqlar:</b>\n"
-            "/myquestions - Mening savollarim\n"
-            "/help - Yordam"
-        )
+        # Все подписки подтверждены - показываем только кнопки
+        # Создаем reply keyboard с кнопками для локации и контакта
+        keyboard = [
+            [KeyboardButton("📍 Klinika manzili")],
+            [KeyboardButton("Алоқа учун")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         
+        # Отправляем сообщение с reply keyboard (без текста или с минимальным)
         if update.callback_query:
             try:
-                await update.callback_query.edit_message_text(welcome_text, reply_markup=None, parse_mode=ParseMode.HTML)
+                # Удаляем предыдущее сообщение с inline кнопками
+                await update.callback_query.delete_message()
             except Exception as e:
-                logger.warning(f"Не удалось отредактировать сообщение: {e}")
-                await update.callback_query.message.reply_text(welcome_text, parse_mode=ParseMode.HTML)
+                logger.debug(f"Не удалось удалить сообщение: {e}")
+            # Отправляем новое сообщение с reply keyboard
+            welcome_message = (
+                "✅ <b>Энди саволларингизни беришингиз мумкин!</b>\n\n"
+                "📝 Саволларингизни матн, видео, расм, хужжат, МРТ шаклда юборинг.\n\n"
+                "⏱️ Жавоб бироз кечикиши мумкин, лекин барча хабарларга албатта жавоб бераман😊"
+            )
+            await update.callback_query.message.reply_text(
+                welcome_message,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML
+            )
         else:
-            await update.message.reply_text(welcome_text, parse_mode=ParseMode.HTML)
+            welcome_message = (
+                "✅ <b>Энди саволларингизни беришингиз мумкин!</b>\n\n"
+                "📝 Саволларингизни матн, видео, расм, хужжат, МРТ шаклда юборинг.\n\n"
+                "⏱️ Жавоб бироз кечикиши мумкин, лекин барча хабарларга албатта жавоб бераман😊"
+            )
+            await update.message.reply_text(
+                welcome_message,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML
+            )
     else:
         # Есть неподтвержденные подписки
         missing_subs = []
@@ -266,21 +249,11 @@ async def update_subscription_status(update: Update, context: ContextTypes.DEFAU
             keyboard.append([InlineKeyboardButton("📢 Telegram каналга обуна бўлиш", callback_data='get_invite_link')])
             keyboard.append([InlineKeyboardButton("✅ Telegram каналга обуна бўлдим", callback_data='check_telegram_sub')])
         
-        if not subscriptions['instagram']:
-            missing_subs.append("📷 Instagram")
-            keyboard.append([InlineKeyboardButton("📷 Instagram", url=config.INSTAGRAM_URL)])
-            keyboard.append([InlineKeyboardButton("✅ Instagramга обуна бўлдим", callback_data='confirm_instagram')])
-        
-        if not subscriptions['youtube']:
-            missing_subs.append("📺 YouTube")
-            keyboard.append([InlineKeyboardButton("📺 YouTube", url=config.YOUTUBE_URL)])
-            keyboard.append([InlineKeyboardButton("✅ YouTubeга обуна бўлдим", callback_data='confirm_youtube')])
-        
         reply_markup = InlineKeyboardMarkup(keyboard)
         missing_text = "\n".join([f"• {sub}" for sub in missing_subs])
         
         status_text = (
-            "⚠️ <b>Куйидаги платформаларга обуна бўлишингиз керак:</b>\n\n"
+            "⚠️ <b>Telegram каналга обуна бўлишингиз керак:</b>\n\n"
             f"{missing_text}\n\n"
             "Юқоридаги тугмаларни босиб обуна бўлинг ва тасдиқланг!"
         )
@@ -321,30 +294,6 @@ async def get_invite_link_callback(update: Update, context: ContextTypes.DEFAULT
         await query.answer("Havola yaratishda xatolik yuz berdi", show_alert=True)
 
 
-async def confirm_instagram_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка подтверждения подписки на Instagram"""
-    query = update.callback_query
-    user_id = query.from_user.id
-    
-    # Сохраняем подтверждение подписки на Instagram
-    db.set_social_subscription(user_id, 'instagram', True)
-    await query.answer("Instagramга обуна тасдиқланди! ✅", show_alert=False)
-    
-    # Обновляем статус подписок
-    await update_subscription_status(update, context, user_id)
-
-
-async def confirm_youtube_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка подтверждения подписки на YouTube"""
-    query = update.callback_query
-    user_id = query.from_user.id
-    
-    # Сохраняем подтверждение подписки на YouTube
-    db.set_social_subscription(user_id, 'youtube', True)
-    await query.answer("YouTubeга обуна тасдиқланди! ✅", show_alert=False)
-    
-    # Обновляем статус подписок
-    await update_subscription_status(update, context, user_id)
 
 
 async def check_telegram_subscription_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -357,6 +306,21 @@ async def check_telegram_subscription_callback(update: Update, context: ContextT
     
     if is_subscribed:
         await query.answer("Telegram каналга обуна тасдиқланди! ✅", show_alert=False)
+        
+        # Удаляем все сообщения со ссылками на канал
+        if 'invite_messages' in context.user_data:
+            deleted_count = 0
+            for msg_id in context.user_data['invite_messages']:
+                try:
+                    await context.bot.delete_message(chat_id=user_id, message_id=msg_id)
+                    deleted_count += 1
+                except Exception as e:
+                    logger.debug(f"Не удалось удалить сообщение {msg_id}: {e}")
+            # Очищаем список сообщений
+            context.user_data['invite_messages'] = []
+            if deleted_count > 0:
+                logger.info(f"Удалено {deleted_count} сообщений со ссылками на канал для пользователя {user_id}")
+        
         # Проверяем все подписки и обновляем сообщение
         await update_subscription_status(update, context, user_id)
     else:
@@ -379,7 +343,7 @@ async def check_telegram_subscription_callback(update: Update, context: ContextT
             # Редактируем текущее сообщение
             keyboard = [
                 [InlineKeyboardButton("📢 Kanalga obuna bo'lish", callback_data='get_invite_link')],
-                [InlineKeyboardButton("✅ Men obuna bo'ldim", callback_data='check_subscription')]
+                [InlineKeyboardButton("✅ Men obuna bo'ldim", callback_data='check_telegram_sub')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -399,7 +363,7 @@ async def check_telegram_subscription_callback(update: Update, context: ContextT
                 "Iltimos, kanalga obuna bo'ling va qayta urinib ko'ring."
             )
             keyboard = [
-                [InlineKeyboardButton("✅ Men obuna bo'ldim", callback_data='check_subscription')]
+                [InlineKeyboardButton("✅ Men obuna bo'ldim", callback_data='check_telegram_sub')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -918,26 +882,43 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             keyboard.append([InlineKeyboardButton("📢 Telegram каналга обуна бўлиш", callback_data='get_invite_link')])
             keyboard.append([InlineKeyboardButton("✅ Telegram каналга обуна бўлдим", callback_data='check_telegram_sub')])
         
-        if not subscriptions['instagram']:
-            missing_subs.append("📷 Instagram")
-            keyboard.append([InlineKeyboardButton("📷 Instagram", url=config.INSTAGRAM_URL)])
-            keyboard.append([InlineKeyboardButton("✅ Instagramга обуна бўлдим", callback_data='confirm_instagram')])
-        
-        if not subscriptions['youtube']:
-            missing_subs.append("📺 YouTube")
-            keyboard.append([InlineKeyboardButton("📺 YouTube", url=config.YOUTUBE_URL)])
-            keyboard.append([InlineKeyboardButton("✅ YouTubeга обуна бўлдим", callback_data='confirm_youtube')])
-        
         reply_markup = InlineKeyboardMarkup(keyboard)
         missing_text = "\n".join([f"• {sub}" for sub in missing_subs])
         
         await message.reply_text(
-            "⚠️ <b>Ботдан фойдаланиш учун куйидаги платформаларга обуна бўлишингиз керак:</b>\n\n"
+            "⚠️ <b>Ботдан фойдаланиш учун Telegram каналга обуна бўлишингиз керак:</b>\n\n"
             f"{missing_text}\n\n"
             "Юқоридаги тугмаларни босиб обуна бўлинг ва тасдиқланг!",
             reply_markup=reply_markup,
             parse_mode=ParseMode.HTML
         )
+        return
+    
+    # Проверяем, нажата ли кнопка "Алоқа учун"
+    if message.text and message.text.strip() == "Алоқа учун":
+        contact_text = (
+            "📞 <b>Биз билан боғланиш учун:</b>\n\n"
+            "📱 <a href=\"tel:+9989989404655\">99 894-046-55-00</a>\n"
+            "📱 <a href=\"tel:+9989989401655\">99 894-016-55-00</a>\n"
+            "📱 <a href=\"tel:+99899899489215\">99 899-489-92-15</a>\n\n"
+            "💬 <i>Рақамни босиб қўнғироқ қилинг</i>"
+        )
+        await message.reply_text(contact_text, parse_mode=ParseMode.HTML)
+        return
+    
+    # Проверяем, нажата ли кнопка "📍 Klinika manzili"
+    if message.text and message.text.strip() == "📍 Klinika manzili":
+        # Координаты клиники: 41.287102, 69.184537
+        await message.reply_location(
+            latitude=41.287102,
+            longitude=69.184537
+        )
+        # Отправляем сообщение с адресом
+        address_text = (
+            "📍 <b>Клиника манзили:</b>\n\n"
+            "Тошкент шаҳри, Учтепа тумани, 23-квартал, 59-уй"
+        )
+        await message.reply_text(address_text, parse_mode=ParseMode.HTML)
         return
     
     # Проверяем, что есть содержимое сообщения
@@ -1041,21 +1022,11 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton("📢 Telegram каналга обуна бўлиш", callback_data='get_invite_link')])
             keyboard.append([InlineKeyboardButton("✅ Telegram каналга обуна бўлдим", callback_data='check_telegram_sub')])
         
-        if not subscriptions['instagram']:
-            missing_subs.append("📷 Instagram")
-            keyboard.append([InlineKeyboardButton("📷 Instagram", url=config.INSTAGRAM_URL)])
-            keyboard.append([InlineKeyboardButton("✅ Instagramга обуна бўлдим", callback_data='confirm_instagram')])
-        
-        if not subscriptions['youtube']:
-            missing_subs.append("📺 YouTube")
-            keyboard.append([InlineKeyboardButton("📺 YouTube", url=config.YOUTUBE_URL)])
-            keyboard.append([InlineKeyboardButton("✅ YouTubeга обуна бўлдим", callback_data='confirm_youtube')])
-        
         reply_markup = InlineKeyboardMarkup(keyboard)
         missing_text = "\n".join([f"• {sub}" for sub in missing_subs])
         
         await update.message.reply_text(
-            "⚠️ <b>Ботдан фойдаланиш учун куйидаги платформаларга обуна бўлишингиз керак:</b>\n\n"
+            "⚠️ <b>Ботдан фойдаланиш учун Telegram каналга обуна бўлишингиз керак:</b>\n\n"
             f"{missing_text}\n\n"
             "Юқоридаги тугмаларни босиб обуна бўлинг ва тасдиқланг!",
             reply_markup=reply_markup,
@@ -1108,21 +1079,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton("📢 Telegram каналга обуна бўлиш", callback_data='get_invite_link')])
             keyboard.append([InlineKeyboardButton("✅ Telegram каналга обуна бўлдим", callback_data='check_telegram_sub')])
         
-        if not subscriptions['instagram']:
-            missing_subs.append("📷 Instagram")
-            keyboard.append([InlineKeyboardButton("📷 Instagram", url=config.INSTAGRAM_URL)])
-            keyboard.append([InlineKeyboardButton("✅ Instagramга обуна бўлдим", callback_data='confirm_instagram')])
-        
-        if not subscriptions['youtube']:
-            missing_subs.append("📺 YouTube")
-            keyboard.append([InlineKeyboardButton("📺 YouTube", url=config.YOUTUBE_URL)])
-            keyboard.append([InlineKeyboardButton("✅ YouTubeга обуна бўлдим", callback_data='confirm_youtube')])
-        
         reply_markup = InlineKeyboardMarkup(keyboard)
         missing_text = "\n".join([f"• {sub}" for sub in missing_subs])
         
         await update.message.reply_text(
-            "⚠️ <b>Ботдан фойдаланиш учун куйидаги платформаларга обуна бўлишингиз керак:</b>\n\n"
+            "⚠️ <b>Ботдан фойдаланиш учун Telegram каналга обуна бўлишингиз керак:</b>\n\n"
             f"{missing_text}\n\n"
             "Юқоридаги тугмаларни босиб обуна бўлинг ва тасдиқланг!",
             reply_markup=reply_markup,
@@ -1416,8 +1377,6 @@ def main():
     application.add_handler(CommandHandler("setdoctor", set_doctor_role))  # Устаревшая команда
     application.add_handler(CallbackQueryHandler(get_invite_link_callback, pattern='get_invite_link'))
     application.add_handler(CallbackQueryHandler(check_telegram_subscription_callback, pattern='check_telegram_sub'))
-    application.add_handler(CallbackQueryHandler(confirm_instagram_callback, pattern='confirm_instagram'))
-    application.add_handler(CallbackQueryHandler(confirm_youtube_callback, pattern='confirm_youtube'))
     
     # Обработчик ответов врачей (должен быть до обычных сообщений)
     application.add_handler(MessageHandler(filters.REPLY & (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL), handle_doctor_reply))
@@ -1427,9 +1386,33 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_message))
     application.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_user_message))
     
+    # Добавляем обработчик ошибок
+    async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Обработчик ошибок"""
+        logger.error(f"Exception while handling an update: {context.error}", exc_info=context.error)
+        
+        # Обработка конфликта (несколько экземпляров бота)
+        if isinstance(context.error, Conflict):
+            logger.error(
+                "Конфликт: обнаружено несколько экземпляров бота. "
+                "Убедитесь, что запущен только один экземпляр бота."
+            )
+            # Не прерываем работу, просто логируем
+        elif isinstance(context.error, TelegramError):
+            logger.error(f"Telegram API ошибка: {context.error}")
+        else:
+            logger.error(f"Неожиданная ошибка: {context.error}", exc_info=context.error)
+    
+    application.add_error_handler(error_handler)
+    
     # Запускаем бота
     logger.info("Бот запущен")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    try:
+        application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    except KeyboardInterrupt:
+        logger.info("Бот остановлен пользователем")
+    except Exception as e:
+        logger.error(f"Критическая ошибка при запуске бота: {e}", exc_info=e)
 
 
 if __name__ == '__main__':
