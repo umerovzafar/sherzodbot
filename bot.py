@@ -72,14 +72,36 @@ async def check_subscription(user_id, context: ContextTypes.DEFAULT_TYPE):
         return False
 
 
+async def check_youtube_subscription(user_id, context: ContextTypes.DEFAULT_TYPE):
+    """Псевдо-проверка подписки на YouTube канал"""
+    # Проверяем, подтвердил ли пользователь подписку на YouTube
+    user_data_key = f'youtube_subscribed_{user_id}'
+    return context.user_data.get(user_data_key, False)
+
+
+async def check_instagram_subscription(user_id, context: ContextTypes.DEFAULT_TYPE):
+    """Псевдо-проверка подписки на Instagram"""
+    # Проверяем, подтвердил ли пользователь подписку на Instagram
+    user_data_key = f'instagram_subscribed_{user_id}'
+    return context.user_data.get(user_data_key, False)
+
+
 async def check_all_subscriptions(user_id, context: ContextTypes.DEFAULT_TYPE):
-    """Проверка подписки на Telegram канал"""
+    """Проверка подписки на все платформы"""
     # Проверяем подписку на Telegram канал
     telegram_subscribed = await check_subscription(user_id, context)
+    # Проверяем подписку на YouTube (псевдо-проверка)
+    youtube_subscribed = await check_youtube_subscription(user_id, context)
+    # Проверяем подписку на Instagram (псевдо-проверка)
+    instagram_subscribed = await check_instagram_subscription(user_id, context)
+    
+    all_subscribed = telegram_subscribed and youtube_subscribed and instagram_subscribed
     
     return {
         'telegram': telegram_subscribed,
-        'all_subscribed': telegram_subscribed
+        'youtube': youtube_subscribed,
+        'instagram': instagram_subscribed,
+        'all_subscribed': all_subscribed
     }
 
 
@@ -138,25 +160,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not subscriptions['all_subscribed']:
         # Формируем клавиатуру со всеми платформами
         keyboard = []
+        missing_subs = []
         
         # Telegram канал
         if not subscriptions['telegram']:
+            missing_subs.append("❌ 📢 Telegram канал")
             keyboard.append([InlineKeyboardButton("📢 Telegram каналга обуна бўлиш", callback_data='get_invite_link')])
             keyboard.append([InlineKeyboardButton("✅ Telegram каналга обуна бўлдим", callback_data='check_telegram_sub')])
         else:
-            keyboard.append([InlineKeyboardButton("✅ Telegram каналга обуна бўлганман", callback_data='check_telegram_sub')])
+            missing_subs.append("✅ 📢 Telegram канал")
+        
+        # YouTube канал
+        if not subscriptions['youtube']:
+            missing_subs.append("❌ 📺 YouTube канал")
+            keyboard.append([InlineKeyboardButton("📺 YouTube каналга обуна бўлиш", url=config.YOUTUBE_URL)])
+            keyboard.append([InlineKeyboardButton("✅ YouTube каналга обуна бўлдим", callback_data='check_youtube_sub')])
+        else:
+            missing_subs.append("✅ 📺 YouTube канал")
+        
+        # Instagram
+        if not subscriptions['instagram']:
+            missing_subs.append("❌ 📷 Instagram")
+            keyboard.append([InlineKeyboardButton("📷 Instagramга обуна бўлиш", url=config.INSTAGRAM_URL)])
+            keyboard.append([InlineKeyboardButton("✅ Instagramга обуна бўлдим", callback_data='check_instagram_sub')])
+        else:
+            missing_subs.append("✅ 📷 Instagram")
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        # Формируем список платформ с отметками о подписке
-        if subscriptions['telegram']:
-            platform_status = "✅ 📢 Telegram канал"
-        else:
-            platform_status = "❌ 📢 Telegram канал"
+        missing_text = "\n".join([f"• {sub}" for sub in missing_subs])
         
         welcome_text = (
-            "⚠️ <b>Ундан олдин Telegram каналга аъзо бўлишингиз ШАРТ:</b>\n\n"
-            f"• {platform_status}\n\n"
+            "⚠️ <b>Ундан олдин ботдан фойдаланиш учун куйидаги платформаларга обуна бўлишингиз ШАРТ:</b>\n\n"
+            f"{missing_text}\n\n"
             "Юқоридаги тугмаларни босиб обуна бўлинг ва тасдиқланг!"
         )
         
@@ -245,15 +281,31 @@ async def update_subscription_status(update: Update, context: ContextTypes.DEFAU
         keyboard = []
         
         if not subscriptions['telegram']:
-            missing_subs.append("📢 Telegram канал")
+            missing_subs.append("❌ 📢 Telegram канал")
             keyboard.append([InlineKeyboardButton("📢 Telegram каналга обуна бўлиш", callback_data='get_invite_link')])
             keyboard.append([InlineKeyboardButton("✅ Telegram каналга обуна бўлдим", callback_data='check_telegram_sub')])
+        else:
+            missing_subs.append("✅ 📢 Telegram канал")
+        
+        if not subscriptions['youtube']:
+            missing_subs.append("❌ 📺 YouTube канал")
+            keyboard.append([InlineKeyboardButton("📺 YouTube каналга обуна бўлиш", url=config.YOUTUBE_URL)])
+            keyboard.append([InlineKeyboardButton("✅ YouTube каналга обуна бўлдим", callback_data='check_youtube_sub')])
+        else:
+            missing_subs.append("✅ 📺 YouTube канал")
+        
+        if not subscriptions['instagram']:
+            missing_subs.append("❌ 📷 Instagram")
+            keyboard.append([InlineKeyboardButton("📷 Instagramга обуна бўлиш", url=config.INSTAGRAM_URL)])
+            keyboard.append([InlineKeyboardButton("✅ Instagramга обуна бўлдим", callback_data='check_instagram_sub')])
+        else:
+            missing_subs.append("✅ 📷 Instagram")
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         missing_text = "\n".join([f"• {sub}" for sub in missing_subs])
         
         status_text = (
-            "⚠️ <b>Telegram каналга обуна бўлишингиз керак:</b>\n\n"
+            "⚠️ <b>Ботдан фойдаланиш учун куйидаги платформаларга обуна бўлишингиз керак:</b>\n\n"
             f"{missing_text}\n\n"
             "Юқоридаги тугмаларни босиб обуна бўлинг ва тасдиқланг!"
         )
@@ -371,6 +423,36 @@ async def check_telegram_subscription_callback(update: Update, context: ContextT
                 await query.edit_message_text(error_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
             except:
                 await query.message.reply_text(error_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+
+async def check_youtube_subscription_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка нажатия кнопки проверки подписки на YouTube канал (псевдо-проверка)"""
+    query = update.callback_query
+    user_id = query.from_user.id
+    
+    # Помечаем, что пользователь подтвердил подписку на YouTube
+    user_data_key = f'youtube_subscribed_{user_id}'
+    context.user_data[user_data_key] = True
+    
+    await query.answer("YouTube каналга обуна тасдиқланди! ✅", show_alert=False)
+    
+    # Проверяем все подписки и обновляем сообщение
+    await update_subscription_status(update, context, user_id)
+
+
+async def check_instagram_subscription_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка нажатия кнопки проверки подписки на Instagram (псевдо-проверка)"""
+    query = update.callback_query
+    user_id = query.from_user.id
+    
+    # Помечаем, что пользователь подтвердил подписку на Instagram
+    user_data_key = f'instagram_subscribed_{user_id}'
+    context.user_data[user_data_key] = True
+    
+    await query.answer("Instagramга обуна тасдиқланди! ✅", show_alert=False)
+    
+    # Проверяем все подписки и обновляем сообщение
+    await update_subscription_status(update, context, user_id)
 
 
 async def handle_admin_reply_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -504,6 +586,20 @@ async def handle_admin_reply_keyboard(update: Update, context: ContextTypes.DEFA
         context.user_data['admin_waiting_for'] = 'change_password'
         return True
     
+    elif text == "📢 Foydalanuvchilarga xabar yuborish":
+        sent_msg = await message.reply_text(
+            "📢 <b>Foydalanuvchilarga xabar yuborish</b>\n\n"
+            "Xabarni yuborish uchun:\n\n"
+            "1️⃣ Tayyor xabarni <b>forward</b> qiling (qayta yuborish)\n"
+            "2️⃣ Yoki to'g'ridan-to'g'ri xabar yuboring (matn, rasm, video, hujjat va h.k.)\n\n"
+            "⚠️ <b>Eslatma:</b> Xabar barcha foydalanuvchilarga yuboriladi (shifokorlar bundan mustasno).",
+            parse_mode=ParseMode.HTML,
+            reply_markup=ReplyKeyboardRemove()
+        )
+        save_admin_message_id(context, sent_msg.message_id)
+        context.user_data['admin_waiting_for'] = 'broadcast_message'
+        return True
+    
     elif text == "🚪 Chiqish":
         # Удаляем историю сообщений бота
         await delete_bot_messages(update, context)
@@ -569,6 +665,158 @@ async def admin_reply_text(update: Update, context: ContextTypes.DEFAULT_TYPE, t
     sent_message = await message.reply_text(text, **kwargs)
     save_admin_message_id(context, sent_message.message_id)
     return sent_message
+
+
+async def broadcast_to_users(update: Update, context: ContextTypes.DEFAULT_TYPE, message_to_send):
+    """Рассылка сообщения всем пользователям кроме врачей"""
+    admin_user_id = update.effective_user.id
+    status_msg = await update.message.reply_text("📢 Xabar yuborilmoqda...")
+    
+    # Получаем список всех пользователей кроме врачей
+    users = db.get_all_users_except_doctors()
+    
+    if not users:
+        await status_msg.edit_text("❌ Foydalanuvchilar topilmadi.")
+        context.user_data.pop('admin_waiting_for', None)
+        await show_admin_panel(update, context)
+        return
+    
+    total_users = len(users)
+    successful = 0
+    failed = 0
+    
+    # Отправляем сообщение каждому пользователю
+    for user in users:
+        try:
+            user_id = user['user_id']
+            
+            # Пропускаем админа, чтобы не отправлять сообщение самому себе
+            if user_id == admin_user_id:
+                continue
+            
+            # Если сообщение переслано, пытаемся использовать forward_message
+            is_forwarded = hasattr(message_to_send, 'forward_origin') and message_to_send.forward_origin is not None
+            if is_forwarded:
+                try:
+                    # Пытаемся получить информацию об источнике пересылки
+                    forward_origin = message_to_send.forward_origin
+                    from_chat_id = None
+                    
+                    # Пробуем разные способы получить chat_id источника
+                    if hasattr(forward_origin, 'chat') and forward_origin.chat:
+                        from_chat_id = forward_origin.chat.id
+                    elif hasattr(forward_origin, 'sender_chat') and forward_origin.sender_chat:
+                        from_chat_id = forward_origin.sender_chat.id
+                    
+                    # Если не удалось получить from_chat_id, используем текущий чат
+                    if not from_chat_id:
+                        from_chat_id = message_to_send.chat_id
+                    
+                    await context.bot.forward_message(
+                        chat_id=user_id,
+                        from_chat_id=from_chat_id,
+                        message_id=message_to_send.message_id
+                    )
+                    successful += 1
+                    await asyncio.sleep(0.05)
+                    continue
+                except Exception as e:
+                    # Если forward не работает, пытаемся отправить как обычное сообщение
+                    logger.warning(f"Не удалось переслать сообщение пользователю {user_id}, пробуем отправить как обычное: {e}")
+                    # Продолжаем к обычной отправке
+                    pass
+            
+            # Отправляем сообщение в зависимости от типа (если не переслано или forward не сработал)
+            if message_to_send.photo:
+                await context.bot.send_photo(
+                    chat_id=user_id,
+                    photo=message_to_send.photo[-1].file_id,
+                    caption=message_to_send.caption,
+                    parse_mode=ParseMode.HTML if message_to_send.caption_html else None
+                )
+                successful += 1
+            elif message_to_send.video:
+                await context.bot.send_video(
+                    chat_id=user_id,
+                    video=message_to_send.video.file_id,
+                    caption=message_to_send.caption,
+                    parse_mode=ParseMode.HTML if message_to_send.caption_html else None
+                )
+                successful += 1
+            elif message_to_send.document:
+                await context.bot.send_document(
+                    chat_id=user_id,
+                    document=message_to_send.document.file_id,
+                    caption=message_to_send.caption,
+                    parse_mode=ParseMode.HTML if message_to_send.caption_html else None
+                )
+                successful += 1
+            elif message_to_send.audio:
+                await context.bot.send_audio(
+                    chat_id=user_id,
+                    audio=message_to_send.audio.file_id,
+                    caption=message_to_send.caption,
+                    parse_mode=ParseMode.HTML if message_to_send.caption_html else None
+                )
+                successful += 1
+            elif message_to_send.voice:
+                await context.bot.send_voice(
+                    chat_id=user_id,
+                    voice=message_to_send.voice.file_id,
+                    caption=message_to_send.caption,
+                    parse_mode=ParseMode.HTML if message_to_send.caption_html else None
+                )
+                successful += 1
+            elif message_to_send.video_note:
+                await context.bot.send_video_note(
+                    chat_id=user_id,
+                    video_note=message_to_send.video_note.file_id
+                )
+                successful += 1
+            elif message_to_send.sticker:
+                await context.bot.send_sticker(
+                    chat_id=user_id,
+                    sticker=message_to_send.sticker.file_id
+                )
+                successful += 1
+            elif message_to_send.text:
+                # Если это просто текст, отправляем его
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=message_to_send.text,
+                    parse_mode=ParseMode.HTML if message_to_send.text_html else None
+                )
+                successful += 1
+            else:
+                # Если тип сообщения не поддерживается, пытаемся переслать
+                is_forwarded = hasattr(message_to_send, 'forward_origin') and message_to_send.forward_origin is not None
+                if not is_forwarded:
+                    failed += 1
+                    logger.warning(f"Неподдерживаемый тип сообщения для пользователя {user_id}")
+                    continue
+            
+            # Небольшая задержка, чтобы не превысить лимиты API
+            await asyncio.sleep(0.05)
+            
+        except Exception as e:
+            failed += 1
+            logger.error(f"Ошибка при отправке сообщения пользователю {user_id}: {e}")
+            # Продолжаем отправку остальным пользователям
+    
+    # Обновляем статус
+    result_text = (
+        f"✅ <b>Xabar yuborildi!</b>\n\n"
+        f"📊 <b>Statistika:</b>\n"
+        f"• Jami foydalanuvchilar: {total_users}\n"
+        f"• Muvaffaqiyatli: {successful}\n"
+        f"• Xatolik: {failed}"
+    )
+    
+    await status_msg.edit_text(result_text, parse_mode=ParseMode.HTML)
+    save_admin_message_id(context, status_msg.message_id)
+    
+    context.user_data.pop('admin_waiting_for', None)
+    await show_admin_panel(update, context)
 
 
 async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -661,32 +909,42 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
                         
                         # Пытаемся проверить, является ли пользователь участником канала
                         in_channel = False
+                        channel_status = None
                         if config.CHANNEL_ID:
                             try:
                                 member = await context.bot.get_chat_member(config.CHANNEL_ID, user_id_to_add)
                                 in_channel = True
-                                channel_status = member.status
+                                channel_status = str(member.status)
                             except:
                                 # Пользователь не в канале
                                 pass
                         
                         # Сообщаем о результате поиска
                         if in_channel:
-                            await message.reply_text(
-                                f"✅ Foydalanuvchi topildi va kanalda mavjud!\n\n"
+                            status_text = channel_status if channel_status else "Noma'lum"
+                            full_name_display = full_name or "Noma'lum"
+                            message_text = (
+                                "✅ Foydalanuvchi topildi va kanalda mavjud!\n\n"
                                 f"👤 Username: <code>@{username_to_search}</code>\n"
-                                f"📝 Ism: {full_name or 'Noma\'lum'}\n"
+                                f"📝 Ism: {full_name_display}\n"
                                 f"🆔 ID: <code>{user_id_to_add}</code>\n"
-                                f"📢 Kanalda: Ha (Status: {channel_status})",
+                                f"📢 Kanalda: Ha (Status: {status_text})"
+                            )
+                            await message.reply_text(
+                                message_text,
                                 parse_mode=ParseMode.HTML
                             )
                         else:
-                            await message.reply_text(
-                                f"✅ Foydalanuvchi topildi!\n\n"
+                            full_name_display = full_name or "Noma'lum"
+                            message_text = (
+                                "✅ Foydalanuvchi topildi!\n\n"
                                 f"👤 Username: <code>@{username_to_search}</code>\n"
-                                f"📝 Ism: {full_name or 'Noma\'lum'}\n"
+                                f"📝 Ism: {full_name_display}\n"
                                 f"🆔 ID: <code>{user_id_to_add}</code>\n"
-                                f"⚠️ Kanalda: Topilmadi (lekin qo'shish mumkin)",
+                                "⚠️ Kanalda: Topilmadi (lekin qo'shish mumkin)"
+                            )
+                            await message.reply_text(
+                                message_text,
                                 parse_mode=ParseMode.HTML
                             )
                     else:
@@ -754,11 +1012,13 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         # Добавляем врача
         if db.add_doctor(user_id_to_add, username, full_name):
+            full_name_display = full_name or "Noma'lum"
+            username_display = username if username else "yo'q"
             result_text = (
                 f"✅ Shifokor qo'shildi!\n\n"
                 f"👤 ID: <code>{user_id_to_add}</code>\n"
-                f"📝 Ism: {full_name or 'Noma\'lum'}\n"
-                f"🔗 Username: @{username if username else 'yo\'q'}"
+                f"📝 Ism: {full_name_display}\n"
+                f"🔗 Username: @{username_display}"
             )
             if phone_number:
                 validated_phone = validate_uzbek_phone(phone_number)
@@ -824,6 +1084,23 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await show_admin_panel(update, context)
         return True
     
+    elif waiting_for == 'broadcast_message':
+        # Проверяем, что есть сообщение для отправки (пересланное или обычное)
+        is_forwarded = hasattr(message, 'forward_origin') and message.forward_origin is not None
+        has_content = bool(message.text or message.photo or message.video or message.document or message.audio or message.voice or message.video_note or message.sticker)
+        
+        if not is_forwarded and not has_content:
+            await message.reply_text(
+                "❌ Xabar topilmadi.\n\n"
+                "Iltimos, yubormoqchi bo'lgan xabarni <b>forward</b> qiling yoki to'g'ridan-to'g'ri yuboring.",
+                parse_mode=ParseMode.HTML
+            )
+            return True
+        
+        # Запускаем рассылку
+        await broadcast_to_users(update, context, message)
+        return True
+    
     return False
 
 
@@ -878,15 +1155,31 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         keyboard = []
         
         if not subscriptions['telegram']:
-            missing_subs.append("📢 Telegram канал")
+            missing_subs.append("❌ 📢 Telegram канал")
             keyboard.append([InlineKeyboardButton("📢 Telegram каналга обуна бўлиш", callback_data='get_invite_link')])
             keyboard.append([InlineKeyboardButton("✅ Telegram каналга обуна бўлдим", callback_data='check_telegram_sub')])
+        else:
+            missing_subs.append("✅ 📢 Telegram канал")
+        
+        if not subscriptions['youtube']:
+            missing_subs.append("❌ 📺 YouTube канал")
+            keyboard.append([InlineKeyboardButton("📺 YouTube каналга обуна бўлиш", url=config.YOUTUBE_URL)])
+            keyboard.append([InlineKeyboardButton("✅ YouTube каналга обуна бўлдим", callback_data='check_youtube_sub')])
+        else:
+            missing_subs.append("✅ 📺 YouTube канал")
+        
+        if not subscriptions['instagram']:
+            missing_subs.append("❌ 📷 Instagram")
+            keyboard.append([InlineKeyboardButton("📷 Instagramга обуна бўлиш", url=config.INSTAGRAM_URL)])
+            keyboard.append([InlineKeyboardButton("✅ Instagramга обуна бўлдим", callback_data='check_instagram_sub')])
+        else:
+            missing_subs.append("✅ 📷 Instagram")
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         missing_text = "\n".join([f"• {sub}" for sub in missing_subs])
         
         await message.reply_text(
-            "⚠️ <b>Ботдан фойдаланиш учун Telegram каналга обуна бўлишингиз керак:</b>\n\n"
+            "⚠️ <b>Ботдан фойдаланиш учун куйидаги платформаларга обуна бўлишингиз керак:</b>\n\n"
             f"{missing_text}\n\n"
             "Юқоридаги тугмаларни босиб обуна бўлинг ва тасдиқланг!",
             reply_markup=reply_markup,
@@ -1018,15 +1311,31 @@ async def my_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = []
         
         if not subscriptions['telegram']:
-            missing_subs.append("📢 Telegram канал")
+            missing_subs.append("❌ 📢 Telegram канал")
             keyboard.append([InlineKeyboardButton("📢 Telegram каналга обуна бўлиш", callback_data='get_invite_link')])
             keyboard.append([InlineKeyboardButton("✅ Telegram каналга обуна бўлдим", callback_data='check_telegram_sub')])
+        else:
+            missing_subs.append("✅ 📢 Telegram канал")
+        
+        if not subscriptions['youtube']:
+            missing_subs.append("❌ 📺 YouTube канал")
+            keyboard.append([InlineKeyboardButton("📺 YouTube каналга обуна бўлиш", url=config.YOUTUBE_URL)])
+            keyboard.append([InlineKeyboardButton("✅ YouTube каналга обуна бўлдим", callback_data='check_youtube_sub')])
+        else:
+            missing_subs.append("✅ 📺 YouTube канал")
+        
+        if not subscriptions['instagram']:
+            missing_subs.append("❌ 📷 Instagram")
+            keyboard.append([InlineKeyboardButton("📷 Instagramга обуна бўлиш", url=config.INSTAGRAM_URL)])
+            keyboard.append([InlineKeyboardButton("✅ Instagramга обуна бўлдим", callback_data='check_instagram_sub')])
+        else:
+            missing_subs.append("✅ 📷 Instagram")
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         missing_text = "\n".join([f"• {sub}" for sub in missing_subs])
         
         await update.message.reply_text(
-            "⚠️ <b>Ботдан фойдаланиш учун Telegram каналга обуна бўлишингиз керак:</b>\n\n"
+            "⚠️ <b>Ботдан фойдаланиш учун куйидаги платформаларга обуна бўлишингиз керак:</b>\n\n"
             f"{missing_text}\n\n"
             "Юқоридаги тугмаларни босиб обуна бўлинг ва тасдиқланг!",
             reply_markup=reply_markup,
@@ -1075,15 +1384,31 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = []
         
         if not subscriptions['telegram']:
-            missing_subs.append("📢 Telegram канал")
+            missing_subs.append("❌ 📢 Telegram канал")
             keyboard.append([InlineKeyboardButton("📢 Telegram каналга обуна бўлиш", callback_data='get_invite_link')])
             keyboard.append([InlineKeyboardButton("✅ Telegram каналга обуна бўлдим", callback_data='check_telegram_sub')])
+        else:
+            missing_subs.append("✅ 📢 Telegram канал")
+        
+        if not subscriptions['youtube']:
+            missing_subs.append("❌ 📺 YouTube канал")
+            keyboard.append([InlineKeyboardButton("📺 YouTube каналга обуна бўлиш", url=config.YOUTUBE_URL)])
+            keyboard.append([InlineKeyboardButton("✅ YouTube каналга обуна бўлдим", callback_data='check_youtube_sub')])
+        else:
+            missing_subs.append("✅ 📺 YouTube канал")
+        
+        if not subscriptions['instagram']:
+            missing_subs.append("❌ 📷 Instagram")
+            keyboard.append([InlineKeyboardButton("📷 Instagramга обуна бўлиш", url=config.INSTAGRAM_URL)])
+            keyboard.append([InlineKeyboardButton("✅ Instagramга обуна бўлдим", callback_data='check_instagram_sub')])
+        else:
+            missing_subs.append("✅ 📷 Instagram")
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         missing_text = "\n".join([f"• {sub}" for sub in missing_subs])
         
         await update.message.reply_text(
-            "⚠️ <b>Ботдан фойдаланиш учун Telegram каналга обуна бўлишингиз керак:</b>\n\n"
+            "⚠️ <b>Ботдан фойдаланиш учун куйидаги платформаларга обуна бўлишингиз керак:</b>\n\n"
             f"{missing_text}\n\n"
             "Юқоридаги тугмаларни босиб обуна бўлинг ва тасдиқланг!",
             reply_markup=reply_markup,
@@ -1134,6 +1459,7 @@ async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [KeyboardButton("➕ Shifokor qo'shish"), KeyboardButton("➖ Shifokorni olib tashlash")],
         [KeyboardButton("📋 Shifokorlar ro'yxati"), KeyboardButton("🔍 Kanalda qidirish")],
+        [KeyboardButton("📢 Foydalanuvchilarga xabar yuborish")],
         [KeyboardButton("🔑 Parolni o'zgartirish"), KeyboardButton("🚪 Chiqish")]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
@@ -1377,6 +1703,8 @@ def main():
     application.add_handler(CommandHandler("setdoctor", set_doctor_role))  # Устаревшая команда
     application.add_handler(CallbackQueryHandler(get_invite_link_callback, pattern='get_invite_link'))
     application.add_handler(CallbackQueryHandler(check_telegram_subscription_callback, pattern='check_telegram_sub'))
+    application.add_handler(CallbackQueryHandler(check_youtube_subscription_callback, pattern='check_youtube_sub'))
+    application.add_handler(CallbackQueryHandler(check_instagram_subscription_callback, pattern='check_instagram_sub'))
     
     # Обработчик ответов врачей (должен быть до обычных сообщений)
     application.add_handler(MessageHandler(filters.REPLY & (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL), handle_doctor_reply))

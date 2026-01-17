@@ -180,6 +180,15 @@ class Database:
         conn.close()
         return [{'user_id': r[0], 'username': r[1], 'full_name': r[2]} for r in results]
     
+    def get_all_users_except_doctors(self):
+        """Получить список всех пользователей кроме врачей"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id, username, full_name FROM users WHERE role != ? OR role IS NULL', ('doctor',))
+        results = cursor.fetchall()
+        conn.close()
+        return [{'user_id': r[0], 'username': r[1], 'full_name': r[2]} for r in results]
+    
     def get_question_by_message_id(self, user_id, message_id):
         """Получить вопрос по ID сообщения и пользователя"""
         conn = self.get_connection()
