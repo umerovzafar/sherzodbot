@@ -1,5 +1,7 @@
 import logging
 import asyncio
+import tempfile
+import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, Contact, Location
 from telegram.ext import (
     Application,
@@ -14,6 +16,13 @@ from telegram.error import Conflict, TelegramError
 import config
 from database import Database
 
+# TTS для голосовых ответов врача (узбекский язык)
+try:
+    from gtts import gTTS
+    TTS_AVAILABLE = True
+except ImportError:
+    TTS_AVAILABLE = False
+
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -23,6 +32,27 @@ logger = logging.getLogger(__name__)
 
 # Инициализация базы данных
 db = Database(config.DATABASE_FILE)
+
+# Максимальная длина текста для TTS (gTTS ограничение)
+TTS_MAX_CHARS = 4000
+
+
+def _text_to_speech_sync(text: str, lang: str = "uz") -> str | None:
+    """Синхронно преобразует текст в MP3. Возвращает путь к временному файлу или None."""
+    if not TTS_AVAILABLE or not text or not text.strip():
+        return None
+    text = text.strip()
+    if len(text) > TTS_MAX_CHARS:
+        text = text[: TTS_MAX_CHARS] + "..."
+    try:
+        tts = gTTS(text=text, lang=lang, slow=False)
+        fd, path = tempfile.mkstemp(suffix=".mp3")
+        os.close(fd)
+        tts.save(path)
+        return path
+    except Exception as e:
+        logger.error(f"TTS error: {e}")
+        return None
 
 
 def validate_uzbek_phone(phone):
@@ -1282,9 +1312,9 @@ async def handle_doctor_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
         await message.reply_text("Savol topilmadi.")
         return
     
-    # Сохраняем ответ в БД
-    answer_text = message.text or message.caption or "Media-xabar"
-    db.add_answer(question_id, user_id, message.message_id, answer_text)
+    # Сохраняем ответ в БД (для голоса текста нет — храним пометку)
+    answer_text = message.text or message.caption or (None if message.voice else "Media-xabar")
+    db.add_answer(question_id, user_id, message.message_id, answer_text or "Ovozli xabar")
     
     # Отправляем ответ пациенту
     doctor_name = user.full_name or user.username or "Shifokor"
@@ -1293,11 +1323,23 @@ async def handle_doctor_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
     patient_message = (
         f"👨‍⚕️ <b>Javob shifokordan {doctor_name}</b>\n\n"
         f"📝 <b>Sizning savolingiz:</b>\n{question_preview}\n\n"
-        f"💬 <b>Javob:</b>\n{answer_text}"
+        f"💬 <b>Javob:</b>\n{answer_text or '🎤 Ovozli xabar'}"
     )
     
     try:
-        if message.photo:
+        if message.voice:
+            # Врач отправил голосовое — пересылаем пациенту как есть
+            caption_voice = (
+                f"👨‍⚕️ <b>Javob shifokordan {doctor_name}</b>\n\n"
+                f"📝 <b>Sizning savolingiz:</b>\n{question_preview}"
+            )
+            await context.bot.send_voice(
+                chat_id=question['user_id'],
+                voice=message.voice.file_id,
+                caption=caption_voice,
+                parse_mode=ParseMode.HTML,
+            )
+        elif message.photo:
             await context.bot.send_photo(
                 chat_id=question['user_id'],
                 photo=message.photo[-1].file_id,
@@ -1319,11 +1361,38 @@ async def handle_doctor_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
                 parse_mode=ParseMode.HTML
             )
         else:
-            await context.bot.send_message(
-                chat_id=question['user_id'],
-                text=patient_message,
-                parse_mode=ParseMode.HTML
-            )
+            # Текстовый ответ врача → отправляем пациенту голосовым сообщением (TTS)
+            voice_path = None
+            try:
+                loop = asyncio.get_event_loop()
+                voice_path = await loop.run_in_executor(
+                    None, _text_to_speech_sync, answer_text, "uz"
+                )
+                if voice_path:
+                    caption_short = (
+                        f"👨‍⚕️ <b>Javob shifokordan {doctor_name}</b>\n\n"
+                        f"📝 <b>Sizning savolingiz:</b>\n{question_preview}"
+                    )
+                    with open(voice_path, "rb") as voice_file:
+                        await context.bot.send_voice(
+                            chat_id=question['user_id'],
+                            voice=voice_file,
+                            caption=caption_short,
+                            parse_mode=ParseMode.HTML,
+                        )
+                else:
+                    # Fallback: если TTS недоступен или ошибка — отправляем текстом
+                    await context.bot.send_message(
+                        chat_id=question['user_id'],
+                        text=patient_message,
+                        parse_mode=ParseMode.HTML,
+                    )
+            finally:
+                if voice_path and os.path.exists(voice_path):
+                    try:
+                        os.unlink(voice_path)
+                    except OSError:
+                        pass
         
         await message.reply_text("✅ Javob bemorga yuborildi.")
     except Exception as e:
@@ -1379,7 +1448,7 @@ def main():
     application.add_handler(CallbackQueryHandler(check_telegram_subscription_callback, pattern='check_telegram_sub'))
     
     # Обработчик ответов врачей (должен быть до обычных сообщений)
-    application.add_handler(MessageHandler(filters.REPLY & (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL), handle_doctor_reply))
+    application.add_handler(MessageHandler(filters.REPLY & (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL | filters.VOICE), handle_doctor_reply))
     
     # Обработчики сообщений от пользователей
     application.add_handler(MessageHandler(filters.CONTACT, handle_user_message))  # Обработка контактов (для админ-панели)
